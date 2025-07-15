@@ -1,102 +1,176 @@
-import Image from "next/image";
+'use client';
+import { useRef, useState, useEffect } from 'react';
+import * as tf from '@tensorflow/tfjs';
+
+const classLabels = [
+  {
+    name: 'Dark',
+    description: 'Bold, smoky flavor with low acidity and visible oils on the beans. Often has chocolate or caramel notes.',
+  },
+  {
+    name: 'Green',
+    description: 'Unroasted beans with grassy, herbal flavors. Higher acidity and caffeine content before roasting.',
+  },
+  {
+    name: 'Light',
+    description: 'Light brown color, no oil on beans. Bright acidity with floral/fruity notes and toasted grain flavors.',
+  },
+  {
+    name: 'Medium',
+    description: 'Balanced flavor with medium acidity and body. Shows caramel sweetness with nutty/chocolate undertones.',
+  }
+];
 
 export default function Home() {
-  return (
-    <div className="font-sans grid grid-rows-[20px_1fr_20px] items-center justify-items-center min-h-screen p-8 pb-20 gap-16 sm:p-20">
-      <main className="flex flex-col gap-[32px] row-start-2 items-center sm:items-start">
-        <Image
-          className="dark:invert"
-          src="/next.svg"
-          alt="Next.js logo"
-          width={180}
-          height={38}
-          priority
-        />
-        <ol className="font-mono list-inside list-decimal text-sm/6 text-center sm:text-left">
-          <li className="mb-2 tracking-[-.01em]">
-            Get started by editing{" "}
-            <code className="bg-black/[.05] dark:bg-white/[.06] font-mono font-semibold px-1 py-0.5 rounded">
-              src/app/page.tsx
-            </code>
-            .
-          </li>
-          <li className="tracking-[-.01em]">
-            Save and see your changes instantly.
-          </li>
-        </ol>
+  const [model, setModel] = useState<tf.LayersModel | null>(null);
+  const [prediction, setPrediction] = useState<{ name: string; description: string } | null>(null);
+  const [imageURL, setImageURL] = useState<string | null>(null);
+  const [isLoading, setIsLoading] = useState(false);
+  const [error, setError] = useState<string | null>(null);
 
-        <div className="flex gap-4 items-center flex-col sm:flex-row">
-          <a
-            className="rounded-full border border-solid border-transparent transition-colors flex items-center justify-center bg-foreground text-background gap-2 hover:bg-[#383838] dark:hover:bg-[#ccc] font-medium text-sm sm:text-base h-10 sm:h-12 px-4 sm:px-5 sm:w-auto"
-            href="https://vercel.com/new?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-            target="_blank"
-            rel="noopener noreferrer"
-          >
-            <Image
-              className="dark:invert"
-              src="/vercel.svg"
-              alt="Vercel logomark"
-              width={20}
-              height={20}
+  const fileInputRef = useRef<HTMLInputElement>(null);
+
+  useEffect(() => {
+    const loadModel = async () => {
+      try {
+        setIsLoading(true);
+        const loadedModel = await tf.loadLayersModel('/model/model.json');
+        setModel(loadedModel);
+      } catch (err) {
+        console.error(err);
+        setError('Failed to load model. Please refresh and try again.');
+      } finally {
+        setIsLoading(false);
+      }
+    };
+
+    loadModel();
+  }, []);
+
+  const handleUpload = (event: React.ChangeEvent<HTMLInputElement>) => {
+    const files = event.target.files;
+    if (!files || files.length === 0) return;
+    const file = files[0];
+    const url = URL.createObjectURL(file);
+    setImageURL(url);
+    setPrediction(null);
+    setError(null);
+  };
+
+  const handlePredict = async () => {
+    if (!model || !imageURL) return;
+
+    setIsLoading(true);
+    setError(null);
+
+    const img = new Image();
+    img.src = imageURL;
+    img.crossOrigin = 'anonymous';
+
+    img.onload = async () => {
+      try {
+        const tensor = tf.tidy(() => {
+          return tf.browser
+            .fromPixels(img)
+            .resizeNearestNeighbor([256, 256])
+            .toFloat()
+            .div(255.0)
+            .expandDims();
+        });
+
+        const output = model.predict(tensor) as tf.Tensor;
+        const data = await output.data();
+        tensor.dispose();
+        output.dispose();
+
+        const predictedIndex = Array.from(data).indexOf(Math.max(...Array.from(data)));
+        setPrediction(classLabels[predictedIndex]);
+      } catch (err) {
+        console.error(err);
+        setError('Prediction failed. Please try again.');
+      } finally {
+        setIsLoading(false);
+      }
+    };
+
+    img.onerror = () => {
+      setError('Failed to load image.');
+      setIsLoading(false);
+    };
+  };
+
+  return (
+    <div className="min-h-screen bg-amber-50 flex flex-col items-center p-6">
+      <h1 className="text-3xl md:text-4xl font-bold text-amber-900 mb-8 mt-4 text-center">
+        Coffee Roast Predictor ☕
+      </h1>
+
+      <div className="w-full max-w-lg flex flex-col items-center">
+        <label
+          htmlFor="file-upload"
+          className="cursor-pointer bg-amber-700 hover:bg-amber-800 text-white font-medium px-6 py-3 rounded-lg shadow mb-6"
+        >
+          Upload Image
+        </label>
+        <input
+          id="file-upload"
+          ref={fileInputRef}
+          type="file"
+          accept="image/*"
+          onChange={handleUpload}
+          className="hidden"
+        />
+
+        {imageURL && (
+          <div className="w-full flex flex-col items-center">
+            <img
+              src={imageURL}
+              alt="Uploaded preview"
+              className="w-full h-auto rounded-xl shadow-lg border-4 border-amber-700 mb-4"
             />
-            Deploy now
-          </a>
-          <a
-            className="rounded-full border border-solid border-black/[.08] dark:border-white/[.145] transition-colors flex items-center justify-center hover:bg-[#f2f2f2] dark:hover:bg-[#1a1a1a] hover:border-transparent font-medium text-sm sm:text-base h-10 sm:h-12 px-4 sm:px-5 w-full sm:w-auto md:w-[158px]"
-            href="https://nextjs.org/docs?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-            target="_blank"
-            rel="noopener noreferrer"
-          >
-            Read our docs
-          </a>
+            <button
+              onClick={handlePredict}
+              disabled={isLoading}
+              className={`${
+                isLoading ? 'bg-gray-500 cursor-not-allowed' : 'bg-green-700 hover:bg-green-800'
+              } text-white px-6 py-2 rounded-lg font-medium shadow transition`}
+            >
+              {isLoading ? 'Analyzing...' : 'Predict Roast'}
+            </button>
+          </div>
+        )}
+
+        {prediction && (
+          <div className="w-full bg-amber-100 rounded-xl p-6 shadow-lg border border-amber-300 mt-6">
+            <h2 className="text-2xl font-bold text-amber-900 mb-4">
+              Roast Level: <span className="text-amber-700">{prediction.name}</span>
+            </h2>
+            <div className="bg-white p-4 rounded-lg shadow-inner">
+              <h3 className="font-semibold text-amber-800 mb-2">Flavor Characteristics:</h3>
+              <p className="text-amber-900">{prediction.description}</p>
+            </div>
+          </div>
+        )}
+
+        {error && (
+          <div className="w-full mt-4 p-3 bg-red-100 text-red-700 rounded-lg text-center">
+            {error}
+          </div>
+        )}
+      </div>
+
+      {isLoading && (
+        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
+          <div className="bg-white rounded-xl p-8 flex flex-col items-center">
+            <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-amber-700 mb-4"></div>
+            <p className="text-lg font-medium text-gray-700">Analyzing coffee beans...</p>
+          </div>
         </div>
-      </main>
-      <footer className="row-start-3 flex gap-[24px] flex-wrap items-center justify-center">
-        <a
-          className="flex items-center gap-2 hover:underline hover:underline-offset-4"
-          href="https://nextjs.org/learn?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-          target="_blank"
-          rel="noopener noreferrer"
-        >
-          <Image
-            aria-hidden
-            src="/file.svg"
-            alt="File icon"
-            width={16}
-            height={16}
-          />
-          Learn
-        </a>
-        <a
-          className="flex items-center gap-2 hover:underline hover:underline-offset-4"
-          href="https://vercel.com/templates?framework=next.js&utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-          target="_blank"
-          rel="noopener noreferrer"
-        >
-          <Image
-            aria-hidden
-            src="/window.svg"
-            alt="Window icon"
-            width={16}
-            height={16}
-          />
-          Examples
-        </a>
-        <a
-          className="flex items-center gap-2 hover:underline hover:underline-offset-4"
-          href="https://nextjs.org?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-          target="_blank"
-          rel="noopener noreferrer"
-        >
-          <Image
-            aria-hidden
-            src="/globe.svg"
-            alt="Globe icon"
-            width={16}
-            height={16}
-          />
-          Go to nextjs.org →
-        </a>
+      )}
+
+      <footer className="mt-12 text-center text-amber-700 text-sm">
+        <p>Upload an image of coffee beans to analyze their roast level</p>
+        <p className="mt-2">Ensure the beans are clearly visible and well-lit</p>
       </footer>
     </div>
   );
