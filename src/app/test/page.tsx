@@ -1,6 +1,7 @@
 'use client';
-import { useEffect, useRef, useState } from 'react';
+import { useRef, useState, useEffect } from 'react';
 import * as tf from '@tensorflow/tfjs';
+import { Camera } from 'react-camera-pro';
 
 const classLabels = [
   {
@@ -22,14 +23,13 @@ const classLabels = [
 ];
 
 export default function Home() {
-  const videoRef = useRef<HTMLVideoElement>(null);
-  const canvasRef = useRef<HTMLCanvasElement>(null);
+  const cameraRef = useRef<any>(null);
   const [model, setModel] = useState<tf.LayersModel | null>(null);
+  const [image, setImage] = useState<string | null>(null);
   const [prediction, setPrediction] = useState<{ name: string; description: string } | null>(null);
   const [isModelLoading, setIsModelLoading] = useState(true);
   const [isPredicting, setIsPredicting] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [cameraActive, setCameraActive] = useState(false);
 
   useEffect(() => {
     const loadModel = async () => {
@@ -38,7 +38,7 @@ export default function Home() {
         setModel(loadedModel);
       } catch (err) {
         console.error(err);
-        setError('Failed to load model. Please refresh and try again.');
+        setError('Failed to load model.');
       } finally {
         setIsModelLoading(false);
       }
@@ -46,69 +46,49 @@ export default function Home() {
     loadModel();
   }, []);
 
-  const startCamera = async () => {
-    setPrediction(null);
-    setError(null);
-    try {
-      const stream = await navigator.mediaDevices.getUserMedia({ video: true });
-      if (videoRef.current) {
-        videoRef.current.srcObject = stream;
-        videoRef.current.play();
-        setCameraActive(true);
-      }
-    } catch (err) {
-      console.error(err);
-      setError('Unable to access camera.');
-    }
-  };
-
-  const stopCamera = () => {
-    if (videoRef.current?.srcObject) {
-      const stream = videoRef.current.srcObject as MediaStream;
-      stream.getTracks().forEach(track => track.stop());
-      videoRef.current.srcObject = null;
-      setCameraActive(false);
-    }
-  };
-
-  const captureAndPredict = async () => {
-    if (!model || !videoRef.current || !canvasRef.current) return;
+  const takeAndPredict = async () => {
+    if (!cameraRef.current || !model) return;
 
     setIsPredicting(true);
+    setPrediction(null);
     setError(null);
 
-    const video = videoRef.current;
-    const canvas = canvasRef.current;
-
-    canvas.width = 256;
-    canvas.height = 256;
-
-    const ctx = canvas.getContext('2d');
-    if (!ctx) return;
-
-    ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
-    const imageData = ctx.getImageData(0, 0, canvas.width, canvas.height);
-
     try {
-      const tensor = tf.tidy(() =>
-        tf.browser
-          .fromPixels(imageData)
-          .toFloat()
-          .div(255.0)
-          .expandDims()
-      );
+      const photo = cameraRef.current.takePhoto();
+      setImage(photo);
 
-      const output = model.predict(tensor) as tf.Tensor;
-      const data = await output.data();
-      tensor.dispose();
-      output.dispose();
+      const img = new Image();
+      img.src = photo;
+      img.crossOrigin = 'anonymous';
 
-      const predictedIndex = Array.from(data).indexOf(Math.max(...Array.from(data)));
-      setPrediction(classLabels[predictedIndex]);
+      img.onload = async () => {
+        try {
+          const tensor = tf.tidy(() =>
+            tf.browser
+              .fromPixels(img)
+              .resizeBilinear([256, 256])
+              .toFloat()
+              .div(255.0)
+              .expandDims()
+          );
+
+          const output = model.predict(tensor) as tf.Tensor;
+          const data = await output.data();
+          tensor.dispose();
+          output.dispose();
+
+          const predictedIndex = Array.from(data).indexOf(Math.max(...Array.from(data)));
+          setPrediction(classLabels[predictedIndex]);
+        } catch (err) {
+          console.error(err);
+          setError('Prediction failed.');
+        } finally {
+          setIsPredicting(false);
+        }
+      };
     } catch (err) {
       console.error(err);
-      setError('Prediction failed.');
-    } finally {
+      setError('Failed to capture photo.');
       setIsPredicting(false);
     }
   };
@@ -120,36 +100,32 @@ export default function Home() {
       </h1>
 
       <div className="w-full max-w-lg flex flex-col items-center">
-        {!cameraActive ? (
-          <button
-            onClick={startCamera}
-            className="bg-amber-700 hover:bg-amber-800 text-white font-medium px-6 py-3 rounded-lg shadow mb-6"
-          >
-            Open Camera
-          </button>
-        ) : (
-          <>
-            <video ref={videoRef} className="rounded-xl shadow-lg border-4 border-amber-700 mb-4 w-full" />
-            <button
-              onClick={captureAndPredict}
-              disabled={isPredicting}
-              className={`${
-                isPredicting ? 'bg-gray-500' : 'bg-green-700 hover:bg-green-800'
-              } text-white px-6 py-2 rounded-lg font-medium shadow transition`}
-            >
-              {isPredicting ? 'Analyzing...' : 'Capture & Predict'}
-            </button>
-            <button
-              onClick={stopCamera}
-              className="mt-3 text-sm text-red-600 hover:underline"
-            >
-              Close Camera
-            </button>
-          </>
-        )}
+        <div className="w-full aspect-video bg-black rounded-xl overflow-hidden shadow-lg mb-4">
+          <Camera ref={cameraRef} aspectRatio={1} errorMessages={{
+                      noCameraAccessible: undefined,
+                      permissionDenied: undefined,
+                      switchCamera: undefined,
+                      canvas: undefined
+                  }} />
+        </div>
 
-        {/* Hidden canvas for capturing frame */}
-        <canvas ref={canvasRef} className="hidden" />
+        <button
+          onClick={takeAndPredict}
+          disabled={isPredicting}
+          className={`${
+            isPredicting ? 'bg-gray-500 cursor-not-allowed' : 'bg-green-700 hover:bg-green-800'
+          } text-white px-6 py-2 rounded-lg font-medium shadow transition`}
+        >
+          {isPredicting ? 'Analyzing...' : 'Take Picture & Predict'}
+        </button>
+
+        {image && (
+          <img
+            src={image}
+            alt="Captured"
+            className="mt-6 rounded-lg shadow border-2 border-amber-700 w-full"
+          />
+        )}
 
         {prediction && (
           <div className="w-full bg-amber-100 rounded-xl p-6 shadow-lg border border-amber-300 mt-6">
@@ -180,7 +156,7 @@ export default function Home() {
         </div>
       )}
 
-      {/* Prediction preloader */}
+      {/* Prediction loader */}
       {isPredicting && (
         <div className="fixed inset-0 bg-black bg-opacity-40 flex items-center justify-center z-40">
           <div className="bg-white rounded-xl p-8 flex flex-col items-center shadow-lg">
@@ -191,8 +167,8 @@ export default function Home() {
       )}
 
       <footer className="mt-12 text-center text-amber-700 text-sm">
-        <p>Arahkan kamera ke biji kopi dan tekan tombol prediksi</p>
-        <p className="mt-2">Pastikan gambar terlihat jelas dan cukup pencahayaan</p>
+        <p>Arahkan kamera ke biji kopi lalu tekan tombol untuk memprediksi tingkat sangrai</p>
+        <p className="mt-2">Pastikan pencahayaan cukup dan gambar jelas</p>
       </footer>
     </div>
   );
