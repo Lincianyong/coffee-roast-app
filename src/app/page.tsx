@@ -18,14 +18,15 @@ const classLabels = [
   {
     name: 'Medium',
     description: 'Balanced flavor with medium acidity and body. Shows caramel sweetness with nutty/chocolate undertones.',
-  }
+  },
 ];
 
 export default function Home() {
   const [model, setModel] = useState<tf.LayersModel | null>(null);
   const [prediction, setPrediction] = useState<{ name: string; description: string } | null>(null);
   const [imageURL, setImageURL] = useState<string | null>(null);
-  const [isLoading, setIsLoading] = useState(false);
+  const [isModelLoading, setIsModelLoading] = useState(true);
+  const [isPredicting, setIsPredicting] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -33,17 +34,15 @@ export default function Home() {
   useEffect(() => {
     const loadModel = async () => {
       try {
-        setIsLoading(true);
         const loadedModel = await tf.loadLayersModel('/model/model.json');
         setModel(loadedModel);
       } catch (err) {
         console.error(err);
         setError('Failed to load model. Please refresh and try again.');
       } finally {
-        setIsLoading(false);
+        setIsModelLoading(false);
       }
     };
-
     loadModel();
   }, []);
 
@@ -60,7 +59,7 @@ export default function Home() {
   const handlePredict = async () => {
     if (!model || !imageURL) return;
 
-    setIsLoading(true);
+    setIsPredicting(true);
     setError(null);
 
     const img = new Image();
@@ -89,13 +88,13 @@ export default function Home() {
         console.error(err);
         setError('Prediction failed. Please try again.');
       } finally {
-        setIsLoading(false);
+        setIsPredicting(false);
       }
     };
 
     img.onerror = () => {
       setError('Failed to load image.');
-      setIsLoading(false);
+      setIsPredicting(false);
     };
   };
 
@@ -130,12 +129,12 @@ export default function Home() {
             />
             <button
               onClick={handlePredict}
-              disabled={isLoading}
+              disabled={isPredicting || !model}
               className={`${
-                isLoading ? 'bg-gray-500 cursor-not-allowed' : 'bg-green-700 hover:bg-green-800'
+                isPredicting ? 'bg-gray-500 cursor-not-allowed' : 'bg-green-700 hover:bg-green-800'
               } text-white px-6 py-2 rounded-lg font-medium shadow transition`}
             >
-              {isLoading ? 'Analyzing...' : 'Predict Roast'}
+              {isPredicting ? 'Analyzing...' : 'Predict Roast'}
             </button>
           </div>
         )}
@@ -159,7 +158,7 @@ export default function Home() {
         )}
       </div>
 
-      {isLoading && (
+      {isPredicting && (
         <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
           <div className="bg-white rounded-xl p-8 flex flex-col items-center">
             <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-amber-700 mb-4"></div>
