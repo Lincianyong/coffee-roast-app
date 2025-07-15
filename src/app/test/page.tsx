@@ -1,5 +1,5 @@
 'use client';
-import { useRef, useState, useEffect } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import * as tf from '@tensorflow/tfjs';
 
 const classLabels = [
@@ -18,21 +18,18 @@ const classLabels = [
   {
     name: 'Medium',
     description: 'Rasa seimbang dengan keasaman dan body sedang. Memiliki rasa manis karamel dengan sentuhan kacang atau cokelat.',
-  }
+  },
 ];
 
 export default function Home() {
+  const videoRef = useRef<HTMLVideoElement>(null);
+  const canvasRef = useRef<HTMLCanvasElement>(null);
   const [model, setModel] = useState<tf.LayersModel | null>(null);
   const [prediction, setPrediction] = useState<{ name: string; description: string } | null>(null);
-  const [imageURL, setImageURL] = useState<string | null>(null);
   const [isModelLoading, setIsModelLoading] = useState(true);
   const [isPredicting, setIsPredicting] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [cameraActive, setCameraActive] = useState(false);
-  
-  const videoRef = useRef<HTMLVideoElement>(null);
-  const streamRef = useRef<MediaStream | null>(null);
-  const canvasRef = useRef<HTMLCanvasElement>(null);
 
   useEffect(() => {
     const loadModel = async () => {
@@ -47,109 +44,78 @@ export default function Home() {
       }
     };
     loadModel();
-
-    // Cleanup camera on unmount
-    return () => {
-      if (streamRef.current) {
-        streamRef.current.getTracks().forEach(track => track.stop());
-      }
-    };
   }, []);
 
   const startCamera = async () => {
+    setPrediction(null);
+    setError(null);
     try {
-      setPrediction(null);
-      setError(null);
-      setImageURL(null);
-      
-      const stream = await navigator.mediaDevices.getUserMedia({ 
-        video: { facingMode: 'environment' } 
-      });
-      streamRef.current = stream;
-      
+      const stream = await navigator.mediaDevices.getUserMedia({ video: true });
       if (videoRef.current) {
         videoRef.current.srcObject = stream;
+        videoRef.current.play();
         setCameraActive(true);
       }
     } catch (err) {
-      console.error('Camera error:', err);
-      setError('Camera access failed. Please ensure you have granted camera permissions.');
+      console.error(err);
+      setError('Unable to access camera.');
     }
   };
 
   const stopCamera = () => {
-    if (streamRef.current) {
-      streamRef.current.getTracks().forEach(track => track.stop());
-      streamRef.current = null;
+    if (videoRef.current?.srcObject) {
+      const stream = videoRef.current.srcObject as MediaStream;
+      stream.getTracks().forEach(track => track.stop());
+      videoRef.current.srcObject = null;
+      setCameraActive(false);
     }
-    setCameraActive(false);
   };
 
-  const captureImage = () => {
-    if (!videoRef.current || !canvasRef.current) return;
-
-    const video = videoRef.current;
-    const canvas = canvasRef.current;
-    const context = canvas.getContext('2d');
-    
-    // Set canvas size to match video
-    canvas.width = video.videoWidth;
-    canvas.height = video.videoHeight;
-    
-    // Draw current video frame to canvas
-    context?.drawImage(video, 0, 0, canvas.width, canvas.height);
-    
-    // Get image URL from canvas
-    const url = canvas.toDataURL('image/jpeg');
-    setImageURL(url);
-    stopCamera();
-  };
-
-  const handlePredict = async () => {
-    if (!model || !imageURL) return;
+  const captureAndPredict = async () => {
+    if (!model || !videoRef.current || !canvasRef.current) return;
 
     setIsPredicting(true);
     setError(null);
 
-    const img = new Image();
-    img.src = imageURL;
-    img.crossOrigin = 'anonymous';
+    const video = videoRef.current;
+    const canvas = canvasRef.current;
 
-    img.onload = async () => {
-      try {
-        const tensor = tf.tidy(() => {
-          return tf.browser
-            .fromPixels(img)
-            .resizeBilinear([256, 256])
-            .toFloat()
-            .div(255.0)
-            .expandDims();
-        });
+    canvas.width = 256;
+    canvas.height = 256;
 
-        const output = model.predict(tensor) as tf.Tensor;
-        const data = await output.data();
-        tensor.dispose();
-        output.dispose();
+    const ctx = canvas.getContext('2d');
+    if (!ctx) return;
 
-        const predictedIndex = Array.from(data).indexOf(Math.max(...Array.from(data)));
-        setPrediction(classLabels[predictedIndex]);
-      } catch (err) {
-        console.error(err);
-        setError('Prediction failed. Please try again.');
-      } finally {
-        setIsPredicting(false);
-      }
-    };
+    ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
+    const imageData = ctx.getImageData(0, 0, canvas.width, canvas.height);
 
-    img.onerror = () => {
-      setError('Failed to load image.');
+    try {
+      const tensor = tf.tidy(() =>
+        tf.browser
+          .fromPixels(imageData)
+          .toFloat()
+          .div(255.0)
+          .expandDims()
+      );
+
+      const output = model.predict(tensor) as tf.Tensor;
+      const data = await output.data();
+      tensor.dispose();
+      output.dispose();
+
+      const predictedIndex = Array.from(data).indexOf(Math.max(...Array.from(data)));
+      setPrediction(classLabels[predictedIndex]);
+    } catch (err) {
+      console.error(err);
+      setError('Prediction failed.');
+    } finally {
       setIsPredicting(false);
-    };
+    }
   };
 
   return (
     <div className="min-h-screen bg-amber-50 flex flex-col items-center p-6">
-      <h1 className="text-3xl md:text-4xl font-bold text-amber-900 mb-8 mt-4 text-center">
+      <h1 className="text-3xl md:text-4xl font-bold text-amber-900 mb-6 text-center">
         Coffee Roast Predictor ☕
       </h1>
 
@@ -162,49 +128,28 @@ export default function Home() {
             Open Camera
           </button>
         ) : (
-          <button
-            onClick={stopCamera}
-            className="bg-red-600 hover:bg-red-700 text-white font-medium px-6 py-3 rounded-lg shadow mb-6"
-          >
-            Close Camera
-          </button>
-        )}
-
-        {cameraActive && (
-          <div className="w-full flex flex-col items-center">
-            <video
-              ref={videoRef}
-              autoPlay
-              playsInline
-              className="w-full h-auto rounded-xl shadow-lg border-4 border-amber-700 mb-4"
-            />
+          <>
+            <video ref={videoRef} className="rounded-xl shadow-lg border-4 border-amber-700 mb-4 w-full" />
             <button
-              onClick={captureImage}
-              className="bg-green-700 hover:bg-green-800 text-white px-6 py-2 rounded-lg font-medium shadow transition"
-            >
-              Capture Image
-            </button>
-          </div>
-        )}
-
-        {imageURL && (
-          <div className="w-full flex flex-col items-center">
-            <img
-              src={imageURL}
-              alt="Captured preview"
-              className="w-full h-auto rounded-xl shadow-lg border-4 border-amber-700 mb-4"
-            />
-            <button
-              onClick={handlePredict}
+              onClick={captureAndPredict}
               disabled={isPredicting}
               className={`${
-                isPredicting ? 'bg-gray-500 cursor-not-allowed' : 'bg-green-700 hover:bg-green-800'
+                isPredicting ? 'bg-gray-500' : 'bg-green-700 hover:bg-green-800'
               } text-white px-6 py-2 rounded-lg font-medium shadow transition`}
             >
-              {isPredicting ? 'Analyzing...' : 'Predict Roast'}
+              {isPredicting ? 'Analyzing...' : 'Capture & Predict'}
             </button>
-          </div>
+            <button
+              onClick={stopCamera}
+              className="mt-3 text-sm text-red-600 hover:underline"
+            >
+              Close Camera
+            </button>
+          </>
         )}
+
+        {/* Hidden canvas for capturing frame */}
+        <canvas ref={canvasRef} className="hidden" />
 
         {prediction && (
           <div className="w-full bg-amber-100 rounded-xl p-6 shadow-lg border border-amber-300 mt-6">
@@ -212,7 +157,7 @@ export default function Home() {
               Roast Level: <span className="text-amber-700">{prediction.name}</span>
             </h2>
             <div className="bg-white p-4 rounded-lg shadow-inner">
-              <h3 className="font-semibold text-amber-800 mb-2">Flavor Characteristics:</h3>
+              <h3 className="font-semibold text-amber-800 mb-2">Ciri-ciri Rasa:</h3>
               <p className="text-amber-900">{prediction.description}</p>
             </div>
           </div>
@@ -224,9 +169,6 @@ export default function Home() {
           </div>
         )}
       </div>
-
-      {/* Hidden canvas for image capture */}
-      <canvas ref={canvasRef} className="hidden" />
 
       {/* Model preloader */}
       {isModelLoading && (
@@ -249,8 +191,8 @@ export default function Home() {
       )}
 
       <footer className="mt-12 text-center text-amber-700 text-sm">
-        <p>Point your camera at coffee beans to analyze their roast level</p>
-        <p className="mt-2">Ensure the beans are clearly visible and well-lit</p>
+        <p>Arahkan kamera ke biji kopi dan tekan tombol prediksi</p>
+        <p className="mt-2">Pastikan gambar terlihat jelas dan cukup pencahayaan</p>
       </footer>
     </div>
   );
