@@ -30,6 +30,7 @@ export default function Home() {
   const [isModelLoading, setIsModelLoading] = useState(true);
   const [isPredicting, setIsPredicting] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [cameraActive, setCameraActive] = useState(false);
 
   useEffect(() => {
     const loadModel = async () => {
@@ -46,6 +47,13 @@ export default function Home() {
     loadModel();
   }, []);
 
+  const activateCamera = () => {
+    setCameraActive(true);
+    setImage(null);
+    setPrediction(null);
+    setError(null);
+  };
+
   const takeAndPredict = async () => {
     if (!cameraRef.current || !model) return;
 
@@ -56,6 +64,7 @@ export default function Home() {
     try {
       const photo = cameraRef.current.takePhoto();
       setImage(photo);
+      setCameraActive(false);
 
       const img = new Image();
       img.src = photo;
@@ -101,31 +110,62 @@ export default function Home() {
 
       <div className="w-full max-w-lg flex flex-col items-center">
         <div className="w-full aspect-video bg-black rounded-xl overflow-hidden shadow-lg mb-4">
-          <Camera ref={cameraRef} aspectRatio={1} errorMessages={{
-                      noCameraAccessible: undefined,
-                      permissionDenied: undefined,
-                      switchCamera: undefined,
-                      canvas: undefined
-                  }} />
+          {cameraActive ? (
+            <Camera
+              ref={cameraRef}
+              aspectRatio={1}
+              errorMessages={{
+                noCameraAccessible: undefined,
+                permissionDenied: undefined,
+                switchCamera: undefined,
+              }}
+            />
+          ) : (
+            <div className="w-full h-full bg-gray-800 flex items-center justify-center text-white">
+              {image ? (
+                <img
+                  src={image}
+                  alt="Captured"
+                  className="w-full h-full object-cover"
+                />
+              ) : (
+                <span>Camera not active</span>
+              )}
+            </div>
+          )}
         </div>
 
-        <button
-          onClick={takeAndPredict}
-          disabled={isPredicting}
-          className={`${
-            isPredicting ? 'bg-gray-500 cursor-not-allowed' : 'bg-green-700 hover:bg-green-800'
-          } text-white px-6 py-2 rounded-lg font-medium shadow transition`}
-        >
-          {isPredicting ? 'Analyzing...' : 'Take Picture & Predict'}
-        </button>
+        <div className="flex gap-4">
+          {!cameraActive && !image && (
+            <button
+              onClick={activateCamera}
+              className="bg-blue-600 hover:bg-blue-700 text-white px-6 py-2 rounded-lg font-medium shadow transition"
+            >
+              Open Camera
+            </button>
+          )}
 
-        {image && (
-          <img
-            src={image}
-            alt="Captured"
-            className="mt-6 rounded-lg shadow border-2 border-amber-700 w-full"
-          />
-        )}
+          {cameraActive && (
+            <button
+              onClick={takeAndPredict}
+              disabled={isPredicting}
+              className={`${
+                isPredicting ? 'bg-gray-500 cursor-not-allowed' : 'bg-green-700 hover:bg-green-800'
+              } text-white px-6 py-2 rounded-lg font-medium shadow transition`}
+            >
+              Take Picture
+            </button>
+          )}
+
+          {image && !cameraActive && (
+            <button
+              onClick={activateCamera}
+              className="bg-amber-600 hover:bg-amber-700 text-white px-6 py-2 rounded-lg font-medium shadow transition"
+            >
+              Retake Picture
+            </button>
+          )}
+        </div>
 
         {prediction && (
           <div className="w-full bg-amber-100 rounded-xl p-6 shadow-lg border border-amber-300 mt-6">
